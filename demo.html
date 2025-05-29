@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>通用事件系统</title>
+  <style>
+    canvas {
+      border: 1px solid black;
+    }
+  </style>
+</head>
+
+<body>
+  <canvas id="myCanvas" width="500" height="500"></canvas>
+  <script>
+    // 通用事件对象
+    class Event {
+      constructor(type, target, data) {
+        this.type = type; // 事件类型
+        this.target = target; // 目标节点
+        this.data = data; // 事件数据（例如点击坐标）
+        this.cancelBubble = false; // 是否阻止冒泡
+      }
+
+      stopPropagation() {
+        this.cancelBubble = true; // 阻止事件冒泡
+      }
+    }
+
+    // 事件管理器
+    class EventManager {
+      constructor() {
+        this.listeners = new Map(); // 事件监听器存储
+      }
+
+      // 添加事件监听器
+      addEventListener(node, type, callback) {
+        if (!this.listeners.has(node)) {
+          this.listeners.set(node, {});
+        }
+        if (!this.listeners.get(node)[type]) {
+          this.listeners.get(node)[type] = [];
+        }
+        this.listeners.get(node)[type].push(callback);
+      }
+
+      // 移除事件监听器
+      removeEventListener(node, type, callback) {
+        const listeners = this.listeners.get(node)?.[type];
+        if (listeners) {
+          const index = listeners.indexOf(callback);
+          if (index > -1) {
+            listeners.splice(index, 1);
+          }
+        }
+      }
+
+      // 分发事件
+      dispatchEvent(event) {
+        let currentNode = event.target;
+        while (currentNode && !event.cancelBubble) {
+          const listeners = this.listeners.get(currentNode)?.[event.type];
+          if (listeners) {
+            for (const callback of listeners) {
+              callback(event);
+              if (event.cancelBubble) break;
+            }
+          }
+          currentNode = currentNode.parent; // 冒泡到父节点
+        }
+      }
+    }
+
+    // 全局事件管理器
+    const globalEventManager = new EventManager();
+
+    // 抽象节点
+    class Node {
+      constructor(x, y, width, height) {
+        this.x = x; // 节点的 X 坐标
+        this.y = y; // 节点的 Y 坐标
+        this.width = width; // 宽度
+        this.height = height; // 高度
+        this.parent = null; // 父节点
+        this.children = []; // 子节点
+      }
+
+      // 添加子节点
+      addChild(child) {
+        child.parent = this;
+        this.children.push(child);
+      }
+
+      // 绑定事件
+      on(type, callback) {
+        globalEventManager.addEventListener(this, type, callback);
+      }
+
+      // 触发事件
+      trigger(type, data) {
+        const event = new Event(type, this, data);
+        globalEventManager.dispatchEvent(event);
+      }
+
+      // 碰撞检测
+      contains(x, y) {
+        return (
+          x >= this.x &&
+          x <= this.x + this.width &&
+          y >= this.y &&
+          y <= this.y + this.height
+        );
+      }
+    }
+
+    // Canvas 适配器
+    class CanvasAdapter {
+      constructor(canvas, rootNode) {
+        this.canvas = canvas;
+        this.rootNode = rootNode;
+
+        // 监听原生 Canvas 事件
+        this.canvas.addEventListener('click', (e) => this.handleEvent(e));
+      }
+
+      // 处理事件
+      handleEvent(e) {
+        const { offsetX, offsetY } = e; // 获取点击坐标
+        const targetNode = this.hitTest(offsetX, offsetY); // 找到目标节点
+        if (targetNode) {
+          targetNode.trigger('click', { x: offsetX, y: offsetY });
+        }
+      }
+
+      // 碰撞检测（找到包含点击位置的节点）
+      hitTest(x, y) {
+        const findHitNode = (node) => {
+          for (const child of node.children) {
+            if (child.contains(x, y)) {
+              return findHitNode(child) || child;
+            }
+          }
+          return null;
+        };
+        return findHitNode(this.rootNode);
+      }
+    }
+
+    // 示例：使用通用事件系统
+
+    // 创建根节点
+    const rootNode = new Node(0, 0, 500, 500);
+
+    // 创建矩形节点
+    const rect1 = new Node(50, 50, 100, 100);
+    rect1.on('click', (event) => {
+      console.log('Rect1 clicked!', event.data);
+      event.stopPropagation(); // 阻止冒泡
+    });
+
+    const rect2 = new Node(200, 200, 100, 100);
+    rect2.on('click', (event) => {
+      console.log('Rect2 clicked!', event.data);
+    });
+
+    rootNode.addChild(rect1);
+    rootNode.addChild(rect2);
+
+    // 初始化 Canvas 适配器
+    const canvas = document.getElementById('myCanvas');
+    const ctx = canvas.getContext('2d');
+    const canvasAdapter = new CanvasAdapter(canvas, rootNode);
+
+    // 绘制节点
+    function render() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // 绘制矩形
+      ctx.fillStyle = 'red';
+      ctx.fillRect(rect1.x, rect1.y, rect1.width, rect1.height);
+
+      ctx.fillStyle = 'blue';
+      ctx.fillRect(rect2.x, rect2.y, rect2.width, rect2.height);
+    }
+
+    render();
+  </script>
+</body>
+
+</html>
