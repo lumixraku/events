@@ -4,23 +4,26 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>事件系统 - 本地坐标</title>
+  <title>事件系统 - 使用矩阵</title>
+  <script src="https://cdn.jsdelivr.net/npm/konva@8.4.2/konva.min.js"></script>
   <style>
-    canvas {
+    #container {
       border: 1px solid black;
+      width: 800px;
+      height: 600px;
     }
   </style>
 </head>
 
 <body>
-  <canvas id="myCanvas" width="500" height="500"></canvas>
+  <div id="container"></div>
   <script>
     // 通用事件对象
     class Event {
       constructor(type, target, data) {
         this.type = type;
         this.target = target;
-        this.data = data; // 包含全局坐标和本地坐标
+        this.data = data;
         this.cancelBubble = false;
       }
 
@@ -70,9 +73,9 @@
         this.width = width;
         this.height = height;
 
-        this.scaleX = 1; // 水平缩放
-        this.scaleY = 1; // 垂直缩放
-        this.rotation = 0; // 旋转角度（弧度）
+        this.scaleX = 1;
+        this.scaleY = 1;
+        this.rotation = 0;
 
         this.parent = null;
         this.children = [];
@@ -92,37 +95,55 @@
         globalEventManager.dispatchEvent(event);
       }
 
-      // 获取全局变换矩阵
-      getGlobalTransform() {
-        let node = this;
-        let transform = this.getLocalTransform();
-        while (node.parent) {
-          node = node.parent;
-          transform = this.multiplyMatrices(node.getLocalTransform(), transform);
-        }
-        return transform;
-      }
-
-      // 获取本地变换矩阵
+      // 修正：获取节点的本地变换矩阵
       getLocalTransform() {
         const cos = Math.cos(this.rotation);
         const sin = Math.sin(this.rotation);
+
+        // 正确的变换矩阵：先缩放，再旋转，最后平移
         return [
-          [this.scaleX * cos, -this.scaleY * sin, this.x],
-          [this.scaleX * sin, this.scaleY * cos, this.y],
-          [0, 0, 1],
+          [this.scaleX * cos, -this.scaleX * sin, this.x],
+          [this.scaleY * sin, this.scaleY * cos, this.y],
+          [0, 0, 1]
         ];
       }
 
-      // 逆变换矩阵
+      // 修正：获取全局变换矩阵
+      getGlobalTransform() {
+        const transforms = [];
+        let node = this;
+
+        // 收集从当前节点到根节点的所有变换
+        while (node) {
+          transforms.unshift(node.getLocalTransform());
+          node = node.parent;
+        }
+
+        // 从根节点开始，依次应用变换
+        let result = transforms[0];
+        for (let i = 1; i < transforms.length; i++) {
+          result = this.multiplyMatrices(result, transforms[i]);
+        }
+
+        return result;
+      }
+
+      // 修正：计算逆矩阵
       getInverseTransform(matrix) {
-        const a = matrix[0][0], b = matrix[0][1], c = matrix[1][0], d = matrix[1][1];
-        const tx = matrix[0][2], ty = matrix[1][2];
+        const a = matrix[0][0], b = matrix[0][1], tx = matrix[0][2];
+        const c = matrix[1][0], d = matrix[1][1], ty = matrix[1][2];
+
         const det = a * d - b * c;
+
+        if (Math.abs(det) < 1e-10) {
+          // 矩阵不可逆，返回单位矩阵
+          return [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+        }
+
         return [
           [d / det, -b / det, (b * ty - d * tx) / det],
           [-c / det, a / det, (c * tx - a * ty) / det],
-          [0, 0, 1],
+          [0, 0, 1]
         ];
       }
 
@@ -140,17 +161,22 @@
       // 应用矩阵变换
       applyMatrix(matrix, point) {
         return [
-          matrix[0][0] * point[0] + matrix[0][1] * point[1] + matrix[0][2] * point[2],
-          matrix[1][0] * point[0] + matrix[1][1] * point[1] + matrix[1][2] * point[2],
-          matrix[2][0] * point[0] + matrix[2][1] * point[1] + matrix[2][2] * point[2],
+          matrix[0][0] * point[0] + matrix[0][1] * point[1] + matrix[0][2],
+          matrix[1][0] * point[0] + matrix[1][1] * point[1] + matrix[1][2],
+          1
         ];
       }
 
-      // 碰撞检测（点击点是否在节点范围内）
-      contains(x, y) {
+      // 修正：碰撞检测
+      contains(globalX, globalY) {
         const globalTransform = this.getGlobalTransform();
         const inverseTransform = this.getInverseTransform(globalTransform);
-        const localPoint = this.applyMatrix(inverseTransform, [x, y, 1]);
+        const localPoint = this.applyMatrix(inverseTransform, [globalX, globalY]);
+
+        console.log(`Node (${this.x}, ${this.y}, ${this.width}, ${this.height})`);
+        console.log('Global point:', globalX, globalY);
+        console.log('Local point:', localPoint[0], localPoint[1]);
+
         return (
           localPoint[0] >= 0 &&
           localPoint[0] <= this.width &&
@@ -163,89 +189,68 @@
       getLocalPoint(globalX, globalY) {
         const globalTransform = this.getGlobalTransform();
         const inverseTransform = this.getInverseTransform(globalTransform);
-        const localPoint = this.applyMatrix(inverseTransform, [globalX, globalY, 1]);
+        const localPoint = this.applyMatrix(inverseTransform, [globalX, globalY]);
         return { x: localPoint[0], y: localPoint[1] };
       }
     }
 
-    // Canvas 适配器
-    class CanvasAdapter {
-      constructor(canvas, rootNode) {
-        this.canvas = canvas;
-        this.rootNode = rootNode;
+    // 初始化 Konva 舞台
+    const stage = new Konva.Stage({
+      container: 'container',
+      width: 800,
+      height: 600,
+    });
+    stage.scale({ x: 2, y: 2 });
 
-        this.canvas.addEventListener('click', (e) => this.handleEvent(e));
+    const layer = new Konva.Layer();
+    stage.add(layer);
+
+    // 修正：创建根节点
+    const rootNode = new Node(0, 0, 400, 300); // 注意：根节点的逻辑尺寸应该是缩放后的尺寸
+    rootNode.scaleX = 2;
+    rootNode.scaleY = 2;
+
+    // 创建矩形节点
+    const rect = new Node(100, 100, 100, 100);
+    rect.on('click', (event) => {
+      console.log('Rect clicked!');
+      console.log('Global coordinates:', event.data.global);
+      console.log('Local coordinates:', event.data.local);
+    });
+    rootNode.addChild(rect);
+
+    // 用 Konva 绘制矩形
+    const konvaRect = new Konva.Rect({
+      x: rect.x,
+      y: rect.y,
+      width: rect.width,
+      height: rect.height,
+      fill: 'red',
+      draggable: false,
+    });
+
+    layer.add(konvaRect);
+
+    // DOM 容器事件监听
+    const container = document.getElementById('container');
+    container.addEventListener('click', (e) => {
+      const { offsetX, offsetY } = e;
+      console.log('Canvas click at:', offsetX, offsetY);
+
+      // 碰撞检测 - 直接使用画布坐标
+      const targetNode = rootNode.children.find((child) => child.contains(offsetX, offsetY));
+      if (targetNode) {
+        const localPoint = targetNode.getLocalPoint(offsetX, offsetY);
+        targetNode.trigger('click', {
+          global: { x: offsetX, y: offsetY },
+          local: localPoint,
+        });
       }
+    });
 
-      handleEvent(e) {
-        const { offsetX, offsetY } = e;
-        const targetNode = this.hitTest(offsetX, offsetY);
-        if (targetNode) {
-          const localPoint = targetNode.getLocalPoint(offsetX, offsetY);
-          targetNode.trigger('click', {
-            global: { x: offsetX, y: offsetY },
-            local: localPoint,
-          });
-        }
-      }
-
-      hitTest(x, y) {
-        const findHitNode = (node) => {
-          for (const child of node.children) {
-            if (child.contains(x, y)) {
-              return findHitNode(child) || child;
-            }
-          }
-          return null;
-        };
-        return findHitNode(this.rootNode);
-      }
-    }
-    </script>
-
-<script>
-  // 创建根节点（stage），并设置全局变换
-  const stage = new Node(0, 0, 500, 500);
-  stage.scaleX = 2; // 全局缩放 2x
-  stage.scaleY = 2;
-
-  // 创建矩形节点（red rect）
-  const rect = new Node(100, 100, 100, 100); // 宽高为 100x100
-  rect.on('click', (event) => {
-    console.log('Rect clicked!');
-    console.log('Global coordinates:', event.data.global);
-    console.log('Local coordinates:', event.data.local);
-  });
-
-  // 将矩形添加到 stage
-  stage.addChild(rect);
-
-  // 初始化 Canvas 适配器
-  const canvas = document.getElementById('myCanvas');
-  const ctx = canvas.getContext('2d');
-  const canvasAdapter = new CanvasAdapter(canvas, stage);
-
-  // 渲染函数
-  function render() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    // 应用 stage 的全局变换
-    ctx.save();
-    ctx.scale(stage.scaleX, stage.scaleY);
-
-    // 绘制 rect
-    ctx.save();
-    ctx.translate(rect.x, rect.y);
-    ctx.fillStyle = 'red';
-    ctx.fillRect(0, 0, rect.width, rect.height);
-    ctx.restore();
-
-    ctx.restore();
-  }
-
-  render();
-</script>
-
+    // 渲染
+    layer.batchDraw();
+  </script>
 </body>
 
 </html>
