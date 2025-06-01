@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>事件系统 - 使用矩阵</title>
+  <title>事件系统 - 支持旋转</title>
   <script src="https://cdn.jsdelivr.net/npm/konva@8.4.2/konva.min.js"></script>
   <style>
     #container {
@@ -12,10 +12,18 @@
       width: 800px;
       height: 600px;
     }
+
+    #controls {
+      margin: 10px 0;
+    }
   </style>
 </head>
 
 <body>
+  <div id="controls">
+    <button onclick="rotateRect()">旋转矩形</button>
+    <span id="rotationDisplay">当前旋转: 0°</span>
+  </div>
   <div id="container"></div>
   <script>
     // 通用事件对象
@@ -68,14 +76,14 @@
     // 抽象节点
     class Node {
       constructor(x, y, width, height) {
-        this.x = x;
+        this.x = x;           // 左上角坐标
         this.y = y;
         this.width = width;
         this.height = height;
 
         this.scaleX = 1;
         this.scaleY = 1;
-        this.rotation = 0;
+        this.rotation = 0;    // 度数，顺时针
 
         this.parent = null;
         this.children = [];
@@ -95,102 +103,87 @@
         globalEventManager.dispatchEvent(event);
       }
 
-      // 修正：获取节点的本地变换矩阵
-      getLocalTransform() {
-        const cos = Math.cos(this.rotation);
-        const sin = Math.sin(this.rotation);
-
-        // 正确的变换矩阵：先缩放，再旋转，最后平移
-        return [
-          [this.scaleX * cos, -this.scaleX * sin, this.x],
-          [this.scaleY * sin, this.scaleY * cos, this.y],
-          [0, 0, 1]
-        ];
+      // 获取矩形的几何中心点
+      getCenterX() {
+        return this.x + this.width / 2;
       }
 
-      // 修正：获取全局变换矩阵
-      getGlobalTransform() {
-        const transforms = [];
-        let node = this;
+      getCenterY() {
+        return this.y + this.height / 2;
+      }
 
-        // 收集从当前节点到根节点的所有变换
-        while (node) {
-          transforms.unshift(node.getLocalTransform());
-          node = node.parent;
+      // 修正的碰撞检测
+      contains(canvasX, canvasY) {
+        // 步骤1：考虑父节点的缩放（根节点缩放2倍）
+        let worldX = canvasX;
+        let worldY = canvasY;
+
+        if (this.parent && (this.parent.scaleX !== 1 || this.parent.scaleY !== 1)) {
+          worldX = canvasX / this.parent.scaleX;
+          worldY = canvasY / this.parent.scaleY;
         }
 
-        // 从根节点开始，依次应用变换
-        let result = transforms[0];
-        for (let i = 1; i < transforms.length; i++) {
-          result = this.multiplyMatrices(result, transforms[i]);
+        // 步骤2：计算相对于矩形中心的坐标
+        const centerX = this.getCenterX();
+        const centerY = this.getCenterY();
+        const dx = worldX - centerX;
+        const dy = worldY - centerY;
+
+        // 步骤3：应用反向旋转变换
+        const radians = -this.rotation * Math.PI / 180; // 负号用于反向旋转
+        const cos = Math.cos(radians);
+        const sin = Math.sin(radians);
+        const rotatedX = dx * cos - dy * sin;
+        const rotatedY = dx * sin + dy * cos;
+
+        // 步骤4：转换为本地坐标（相对于左上角）
+        const localX = rotatedX + this.width / 2;
+        const localY = rotatedY + this.height / 2;
+
+        // 步骤5：检查是否在矩形范围内
+        const isInside = localX >= 0 && localX <= this.width &&
+          localY >= 0 && localY <= this.height;
+
+        console.log(`=== 碰撞检测 ===`);
+        console.log(`Canvas点击: (${canvasX}, ${canvasY})`);
+        console.log(`世界坐标: (${worldX}, ${worldY})`);
+        console.log(`矩形中心: (${centerX}, ${centerY})`);
+        console.log(`相对中心: (${dx}, ${dy})`);
+        console.log(`旋转${this.rotation}°后: (${rotatedX.toFixed(2)}, ${rotatedY.toFixed(2)})`);
+        console.log(`本地坐标: (${localX.toFixed(2)}, ${localY.toFixed(2)})`);
+        console.log(`矩形范围: 0-${this.width} x 0-${this.height}`);
+        console.log(`结果: ${isInside ? '内部' : '外部'}`);
+        console.log('---');
+
+        return isInside;
+      }
+
+      // 获取准确的本地坐标
+      getLocalPoint(canvasX, canvasY) {
+        // 考虑父节点缩放
+        let worldX = canvasX;
+        let worldY = canvasY;
+
+        if (this.parent && (this.parent.scaleX !== 1 || this.parent.scaleY !== 1)) {
+          worldX = canvasX / this.parent.scaleX;
+          worldY = canvasY / this.parent.scaleY;
         }
 
-        return result;
-      }
+        const centerX = this.getCenterX();
+        const centerY = this.getCenterY();
+        const dx = worldX - centerX;
+        const dy = worldY - centerY;
 
-      // 修正：计算逆矩阵
-      getInverseTransform(matrix) {
-        const a = matrix[0][0], b = matrix[0][1], tx = matrix[0][2];
-        const c = matrix[1][0], d = matrix[1][1], ty = matrix[1][2];
+        const radians = -this.rotation * Math.PI / 180;
+        const cos = Math.cos(radians);
+        const sin = Math.sin(radians);
+        const rotatedX = dx * cos - dy * sin;
+        const rotatedY = dx * sin + dy * cos;
 
-        const det = a * d - b * c;
+        const localX = rotatedX + this.width / 2;
+        const localY = rotatedY + this.height / 2;
 
-        if (Math.abs(det) < 1e-10) {
-          // 矩阵不可逆，返回单位矩阵
-          return [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
-        }
-
-        return [
-          [d / det, -b / det, (b * ty - d * tx) / det],
-          [-c / det, a / det, (c * tx - a * ty) / det],
-          [0, 0, 1]
-        ];
-      }
-
-      // 矩阵相乘
-      multiplyMatrices(a, b) {
-        const result = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
-        for (let i = 0; i < 3; i++) {
-          for (let j = 0; j < 3; j++) {
-            result[i][j] = a[i][0] * b[0][j] + a[i][1] * b[1][j] + a[i][2] * b[2][j];
-          }
-        }
-        return result;
-      }
-
-      // 应用矩阵变换
-      applyMatrix(matrix, point) {
-        return [
-          matrix[0][0] * point[0] + matrix[0][1] * point[1] + matrix[0][2],
-          matrix[1][0] * point[0] + matrix[1][1] * point[1] + matrix[1][2],
-          1
-        ];
-      }
-
-      // 修正：碰撞检测
-      contains(globalX, globalY) {
-        const globalTransform = this.getGlobalTransform();
-        const inverseTransform = this.getInverseTransform(globalTransform);
-        const localPoint = this.applyMatrix(inverseTransform, [globalX, globalY]);
-
-        console.log(`Node (${this.x}, ${this.y}, ${this.width}, ${this.height})`);
-        console.log('Global point:', globalX, globalY);
-        console.log('Local point:', localPoint[0], localPoint[1]);
-
-        return (
-          localPoint[0] >= 0 &&
-          localPoint[0] <= this.width &&
-          localPoint[1] >= 0 &&
-          localPoint[1] <= this.height
-        );
-      }
-
-      // 获取本地坐标
-      getLocalPoint(globalX, globalY) {
-        const globalTransform = this.getGlobalTransform();
-        const inverseTransform = this.getInverseTransform(globalTransform);
-        const localPoint = this.applyMatrix(inverseTransform, [globalX, globalY]);
-        return { x: localPoint[0], y: localPoint[1] };
+        return { x: localX, y: localY };
       }
     }
 
@@ -200,44 +193,77 @@
       width: 800,
       height: 600,
     });
-    stage.scale({ x: 2, y: 2 });
+    stage.scale({ x: 2, y: 2 }); // 整个舞台放大2倍
 
     const layer = new Konva.Layer();
     stage.add(layer);
 
-    // 修正：创建根节点
-    const rootNode = new Node(0, 0, 400, 300); // 注意：根节点的逻辑尺寸应该是缩放后的尺寸
+    // 创建根节点
+    const rootNode = new Node(0, 0, 400, 300);
     rootNode.scaleX = 2;
     rootNode.scaleY = 2;
 
     // 创建矩形节点
     const rect = new Node(100, 100, 100, 100);
     rect.on('click', (event) => {
-      console.log('Rect clicked!');
-      console.log('Global coordinates:', event.data.global);
-      console.log('Local coordinates:', event.data.local);
+      console.log('✅ 矩形被点击了!');
+      console.log('全局坐标:', event.data.global);
+      console.log('本地坐标:', event.data.local);
+      rect.rotation = (30) % 360; // 每次点击旋转15度
+      updateDisplay();
     });
     rootNode.addChild(rect);
 
-    // 用 Konva 绘制矩形
+    // 用 Konva 绘制矩形（注意：Konva的坐标要和Node保持一致）
     const konvaRect = new Konva.Rect({
       x: rect.x,
       y: rect.y,
       width: rect.width,
       height: rect.height,
       fill: 'red',
+      stroke: 'black',
+      strokeWidth: 1,
       draggable: false,
+      // 设置旋转中心为矩形中心
+      offsetX: rect.width / 2,
+      offsetY: rect.height / 2,
     });
 
+    // 将 Konva 矩形的位置设置为几何中心
+    konvaRect.x(rect.getCenterX());
+    konvaRect.y(rect.getCenterY());
+
     layer.add(konvaRect);
+
+    // 添加一个参考点显示矩形中心
+    const centerDot = new Konva.Circle({
+      x: rect.getCenterX(),
+      y: rect.getCenterY(),
+      radius: 3,
+      fill: 'blue'
+    });
+    layer.add(centerDot);
+
+    // 更新显示
+    function updateDisplay() {
+      konvaRect.rotation(rect.rotation);
+      document.getElementById('rotationDisplay').textContent = `当前旋转: ${rect.rotation}°`;
+      layer.batchDraw();
+    }
+
+    // 旋转矩形按钮
+    function rotateRect() {
+      rect.rotation = 30 % 360;
+      updateDisplay();
+    }
 
     // DOM 容器事件监听
     const container = document.getElementById('container');
     container.addEventListener('click', (e) => {
       const { offsetX, offsetY } = e;
-      console.log('Canvas click at:', offsetX, offsetY);
+      console.log(`\n🖱️ 点击画布: (${offsetX}, ${offsetY})`);
 
-      // 碰撞检测 - 直接使用画布坐标
+      // 碰撞检测
       const targetNode = rootNode.children.find((child) => child.contains(offsetX, offsetY));
       if (targetNode) {
         const localPoint = targetNode.getLocalPoint(offsetX, offsetY);
@@ -245,11 +271,13 @@
           global: { x: offsetX, y: offsetY },
           local: localPoint,
         });
+      } else {
+        console.log('❌ 没有点击到任何节点');
       }
     });
 
-    // 渲染
-    layer.batchDraw();
+    // 初始渲染
+    updateDisplay();
   </script>
 </body>
 
