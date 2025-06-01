@@ -209,8 +209,7 @@
       console.log('✅ 矩形被点击了!');
       console.log('全局坐标:', event.data.global);
       console.log('本地坐标:', event.data.local);
-      rect.rotation = (30) % 360; // 每次点击旋转15度
-      updateDisplay();
+      rotateRect();
     });
     rootNode.addChild(rect);
 
@@ -253,7 +252,7 @@
 
     // 旋转矩形按钮
     function rotateRect() {
-      rect.rotation = 30 % 360;
+      rect.rotation = (rect.rotation + 15) % 360;
       updateDisplay();
     }
 
