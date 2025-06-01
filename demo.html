@@ -201,35 +201,51 @@
         return findHitNode(this.rootNode);
       }
     }
+    </script>
 
-    // 示例
-    const rootNode = new Node(0, 0, 500, 500);
-    const rect = new Node(100, 100, 100, 100);
-    rect.scaleX = 2;
-    rect.scaleY = 2;
-    rect.on('click', (event) => {
-      console.log('Rect clicked!');
-      console.log('Global coordinates:', event.data.global);
-      console.log('Local coordinates:', event.data.local);
-    });
-    rootNode.addChild(rect);
+<script>
+  // 创建根节点（stage），并设置全局变换
+  const stage = new Node(0, 0, 500, 500);
+  stage.scaleX = 2; // 全局缩放 2x
+  stage.scaleY = 2;
 
-    const canvas = document.getElementById('myCanvas');
-    const ctx = canvas.getContext('2d');
-    const canvasAdapter = new CanvasAdapter(canvas, rootNode);
+  // 创建矩形节点（red rect）
+  const rect = new Node(100, 100, 100, 100); // 宽高为 100x100
+  rect.on('click', (event) => {
+    console.log('Rect clicked!');
+    console.log('Global coordinates:', event.data.global);
+    console.log('Local coordinates:', event.data.local);
+  });
 
-    function render() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.save();
-      ctx.translate(rect.x, rect.y);
-      ctx.scale(rect.scaleX, rect.scaleY);
-      ctx.fillStyle = 'red';
-      ctx.fillRect(0, 0, rect.width, rect.height);
-      ctx.restore();
-    }
+  // 将矩形添加到 stage
+  stage.addChild(rect);
 
-    render();
-  </script>
+  // 初始化 Canvas 适配器
+  const canvas = document.getElementById('myCanvas');
+  const ctx = canvas.getContext('2d');
+  const canvasAdapter = new CanvasAdapter(canvas, stage);
+
+  // 渲染函数
+  function render() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // 应用 stage 的全局变换
+    ctx.save();
+    ctx.scale(stage.scaleX, stage.scaleY);
+
+    // 绘制 rect
+    ctx.save();
+    ctx.translate(rect.x, rect.y);
+    ctx.fillStyle = 'red';
+    ctx.fillRect(0, 0, rect.width, rect.height);
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  render();
+</script>
+
 </body>
 
 </html>
